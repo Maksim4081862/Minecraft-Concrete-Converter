@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Minecraft Concrete Converter</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #1a1a1a;
+            color: #eee;
+            text-align: center;
+            padding: 20px;
+            margin: 0;
+        }
+        h1 { color: #7fc94f; }
+        .panel {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 10px;
+            display: inline-block;
+            margin: 20px 0;
+            max-width: 600px;
+            width: 100%;
+        }
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            background: #333;
+            border: 1px solid #555;
+            border-radius: 5px;
+            color: white;
+            margin: 10px 0;
+        }
+        input[type="range"] { width: 100%; }
+        #status {
+            margin: 15px 0;
+            padding: 12px;
+            border-radius: 5px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+        }
+        .success { color: #6bff6b; }
+        .error { color: #ff6b6b; }
+        
+        #texturePreview {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            justify-content: center;
+            margin: 15px 0;
+        }
+        .texture-swatch {
+            width: 32px;
+            height: 32px;
+            border: 2px solid #555;
+            image-rendering: pixelated;
+        }
+        .texture-swatch.loaded { border-color: #4CAF50; }
+        
+        #canvasContainer {
+            overflow: auto;
+            max-width: 100%;
+            border: 2px solid #444;
+            margin: 20px 0;
+        }
+        canvas {
+            image-rendering: pixelated;
+            display: block;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        button:hover { background: #45a049; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin: 10px 0;
+        }
+        .checkbox-group input {
+            width: auto;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>⛏️ Minecraft Concrete Converter</h1>
+    
+    <div class="panel">
+        <h3>📁 Текстуры</h3>
+        <div id="status">Загрузка...</div>
+        <div id="texturePreview"></div>
+        
+        <h3>🖼️ Конвертация</h3>
+        <input type="file" id="imageInput" accept="image/*">
+        <label>Ширина: <strong id="resValue">64</strong> блоков</label>
+        <input type="range" id="resolution" min="16" max="100" value="64">
+        
+        <div class="checkbox-group">
+            <input type="checkbox" id="showGrid" checked>
+            <label for="showGrid" style="margin: 0;">Показывать сетку блоков</label>
+        </div>
+        
+        <button id="downloadBtn" onclick="downloadImage()" disabled>📥 Скачать PNG</button>
+    </div>
+
+    <div id="canvasContainer">
+        <canvas id="outputCanvas"></canvas>
+    </div>
+Textures from Minecraft © Mojang Studios
+<script>
+    const BLOCK_SIZE = 16; // Размер одного блока в пикселях
+    
+    const BLOCKS = [
+        { name: "white",       rgb: [240, 240, 240] },
+        { name: "orange",      rgb: [249, 128, 29] },
+        { name: "magenta",     rgb: [199, 78, 189] },
+        { name: "light_blue",  rgb: [58, 179, 218] },
+        { name: "yellow",      rgb: [254, 216, 61] },
+        { name: "lime",        rgb: [128, 199, 31] },
+        { name: "pink",        rgb: [243, 139, 170] },
+        { name: "gray",        rgb: [71, 79, 82] },
+        { name: "light_gray",  rgb: [157, 157, 151] },
+        { name: "cyan",        rgb: [22, 156, 156] },
+        { name: "purple",      rgb: [137, 50, 184] },
+        { name: "blue",        rgb: [60, 68, 170] },
+        { name: "brown",       rgb: [131, 84, 50] },
+        { name: "green",       rgb: [94, 124, 22] },
+        { name: "red",         rgb: [176, 46, 38] },
+        { name: "black",       rgb: [29, 29, 33] }
+    ];
+
+    const textures = {};
+    let loadedCount = 0;
+
+    // Загрузка текстур
+    BLOCKS.forEach(block => {
+        const url = `./textures/${block.name}_concrete_powder.png`;
+        const swatch = document.createElement('img');
+        swatch.className = 'texture-swatch';
+        swatch.title = block.name;
+        document.getElementById('texturePreview').appendChild(swatch);
+        
+        const img = new Image();
+        img.onload = () => {
+            textures[block.name] = img;
+            loadedCount++;
+            swatch.src = url;
+            swatch.classList.add('loaded');
+            checkAllLoaded();
+        };
+        img.onerror = () => {
+            textures[block.name] = null;
+            swatch.style.background = `rgb(${block.rgb.join(',')})`;
+            loadedCount++;
+            checkAllLoaded();
+        };
+        img.src = url;
+    });
+
+    function checkAllLoaded() {
+        if (loadedCount === BLOCKS.length) {
+            const failed = Object.values(textures).filter(t => t === null).length;
+            const statusEl = document.getElementById('status');
+            if (failed > 0) {
+                statusEl.textContent = `⚠️ Загружено ${BLOCKS.length - failed}/${BLOCKS.length} текстур`;
+                statusEl.className = 'error';
+            } else {
+                statusEl.textContent = `✅ Все ${BLOCKS.length} текстур загружены!`;
+                statusEl.className = 'success';
+            }
+        }
+    }
+
+    const canvas = document.getElementById('outputCanvas');
+    const ctx = canvas.getContext('2d');
+    let sourceImage = null;
+    let isProcessing = false;
+
+    document.getElementById('resolution').addEventListener('input', (e) => {
+        document.getElementById('resValue').textContent = e.target.value;
+        if (sourceImage && !isProcessing) render();
+    });
+
+    document.getElementById('showGrid').addEventListener('change', () => {
+        if (sourceImage && !isProcessing) render();
+    });
+
+    document.getElementById('imageInput').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        document.getElementById('status').textContent = 'Загрузка изображения...';
+        document.getElementById('downloadBtn').disabled = true;
+        
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            sourceImage = new Image();
+            sourceImage.onload = () => render();
+            sourceImage.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+
+    function findClosestColor(r, g, b) {
+        let best = BLOCKS[0], minDist = Infinity;
+        for (const block of BLOCKS) {
+            const dist = Math.pow(r - block.rgb[0], 2) + 
+                        Math.pow(g - block.rgb[1], 2) + 
+                        Math.pow(b - block.rgb[2], 2);
+            if (dist < minDist) {
+                minDist = dist;
+                best = block;
+            }
+        }
+        return best;
+    }
+
+    async function render() {
+        if (!sourceImage || isProcessing) return;
+        isProcessing = true;
+        document.getElementById('status').textContent = 'Обработка...';
+        
+        await new Promise(r => setTimeout(r, 10));
+
+        const blocksWidth = parseInt(document.getElementById('resolution').value);
+        const blocksHeight = Math.round(sourceImage.height * blocksWidth / sourceImage.width);
+        const showGrid = document.getElementById('showGrid').checked;
+        
+        // Устанавливаем размер канваса: количество блоков × размер блока
+        canvas.width = blocksWidth * BLOCK_SIZE;
+        canvas.height = blocksHeight * BLOCK_SIZE;
+        
+        // Ресайз исходного изображения до размера в блоках
+        const tmp = document.createElement('canvas');
+        tmp.width = blocksWidth;
+        tmp.height = blocksHeight;
+        const tctx = tmp.getContext('2d');
+        tctx.imageSmoothingEnabled = true;
+        tctx.imageSmoothingQuality = 'high';
+        tctx.drawImage(sourceImage, 0, 0, blocksWidth, blocksHeight);
+        
+        const data = tctx.getImageData(0, 0, blocksWidth, blocksHeight).data;
+        
+        // Рисуем каждый блок текстуры
+        for (let by = 0; by < blocksHeight; by++) {
+            for (let bx = 0; bx < blocksWidth; bx++) {
+                const i = (by * blocksWidth + bx) * 4;
+                const block = findClosestColor(data[i], data[i+1], data[i+2]);
+                const tex = textures[block.name];
+                
+                const x = bx * BLOCK_SIZE;
+                const y = by * BLOCK_SIZE;
+                
+                if (tex) {
+                    // Рисуем текстуру блока размером BLOCK_SIZE×BLOCK_SIZE
+                    ctx.drawImage(tex, x, y, BLOCK_SIZE, BLOCK_SIZE);
+                } else {
+                    // Если текстуры нет - рисуем цвет
+                    ctx.fillStyle = `rgb(${block.rgb.join(',')})`;
+                    ctx.fillRect(x, y, BLOCK_SIZE, BLOCK_SIZE);
+                }
+                
+                // Рисуем сетку если включена
+                if (showGrid) {
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                    ctx.lineWidth = 1;
+                    
+                    // Правая граница
+                    ctx.beginPath();
+                    ctx.moveTo(x + BLOCK_SIZE, y);
+                    ctx.lineTo(x + BLOCK_SIZE, y + BLOCK_SIZE);
+                    ctx.stroke();
+                    
+                    // Нижняя граница
+                    ctx.beginPath();
+                    ctx.moveTo(x, y + BLOCK_SIZE);
+                    ctx.lineTo(x + BLOCK_SIZE, y + BLOCK_SIZE);
+                    ctx.stroke();
+                }
+            }
+        }
+        
+        // Если сетка включена, рисуем левую и верхнюю границы всего изображения
+        if (showGrid) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = 1;
+            
+            // Левая граница
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(0, canvas.height);
+            ctx.stroke();
+            
+            // Верхняя граница
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(canvas.width, 0);
+            ctx.stroke();
+        }
+        
+        isProcessing = false;
+        document.getElementById('status').textContent = 
+            `✅ Готово! ${blocksWidth}×${blocksHeight} блоков (${canvas.width}×${canvas.height}px)`;
+        document.getElementById('downloadBtn').disabled = false;
+    }
+
+    function downloadImage() {
+        if (!sourceImage) return;
+        
+        // Создаём канвас для экспорта
+        const exportCanvas = document.createElement('canvas');
+        exportCanvas.width = canvas.width;
+        exportCanvas.height = canvas.height;
+        const ectx = exportCanvas.getContext('2d');
+        ectx.imageSmoothingEnabled = false;
+        ectx.drawImage(canvas, 0, 0);
+        
+        const link = document.createElement('a');
+        const blocksWidth = parseInt(document.getElementById('resolution').value);
+        const blocksHeight = Math.round(sourceImage.height * blocksWidth / sourceImage.width);
+        link.download = `minecraft-${blocksWidth}x${blocksHeight}-blocks.png`;
+        link.href = exportCanvas.toDataURL();
+        link.click();
+    }
+</script>
+
+</body>
+</html>
